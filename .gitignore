@@ -1,3 +1,8 @@
 .vscode*
 __pycache__*
 ._*
+.nfs*
+.ipynb_checkpoints
+.DS_Store
+.AppleDouble
+.LSOverride
