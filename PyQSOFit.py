@@ -26,7 +26,7 @@ from astropy.coordinates import SkyCoord
 from quasarfit.extinction import wang2019
 from quasarfit.extinction import deredden
 import warnings
-warnings.filterwarnings("ignore")
+# warnings.filterwarnings("ignore")
 
 
 def smooth(y, box_pts):
