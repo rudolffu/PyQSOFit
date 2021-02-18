@@ -145,7 +145,7 @@ def manygauss(xval, pp):
 
 class QSOFit():
     
-    def __init__(self,lam,flux,err,z,ra=None,dec=None,plateid = None,mjd = None,fiberid = None,path = None,and_mask = None, or_mask = None):
+    def __init__(self,lam,flux,err,z,ra=None,dec=None,name=None,plateid = None,mjd = None,fiberid = None,path = None,and_mask = None, or_mask = None):
         """
         Get the input data perpared for the QSO spectral fitting
         
@@ -185,6 +185,7 @@ class QSOFit():
         self.or_mask = or_mask
         self.ra = ra
         self.dec = dec
+        self.name = name
         self.plateid = plateid
         self.mjd = mjd
         self.fiberid = fiberid
@@ -193,6 +194,70 @@ class QSOFit():
             self.coord = SkyCoord(ra=ra*u.deg, dec=dec*u.deg, frame='icrs')
         
         
+    @classmethod
+    def fromiraf(cls, fname, redshift=None, path=None):
+        """
+        Initialize spectrum object from IRAF generated
+        fits file.
+        Parameters:
+        ----------
+            fname : str
+                name of the fits file.
+            redshift : float
+                redshift of the spectrum.
+        Returns:
+        ----------
+            cls : class
+                A Spec object.
+        """
+        hdu = fits.open(fname)
+        header = hdu[0].header
+        objname = header['object']
+        if redshift is None:
+            try:
+                redshift = float(header['redshift'])
+            except:
+                print("Redshift not provided, setting redshift to zero.")
+                redshift = 0
+        try:
+            ra = float(header['ra'])
+            dec = float(header['dec'])
+        except:
+            coord = SkyCoord(header['RA']+header['DEC'], 
+                             frame='icrs',
+                             unit=(u.hourangle, u.deg))
+            ra = coord.ra.value
+            dec = coord.dec.value
+        if path is None:
+            path = './'
+        CRVAL1 = float(header['CRVAL1'])
+        CD1_1 = float(header['CD1_1'])
+        CRPIX1 = float(header['CRPIX1'])
+        data = hdu[0].data
+        hdudata = data
+        dim = len(data.shape)
+        if dim==1:
+            l = len(data)
+            wave = np.linspace(CRVAL1, 
+                               CRVAL1 + (l - CRPIX1) * CD1_1, 
+                               l)
+            flux = data
+            err = None
+        elif dim==3:
+            l = data.shape[2]
+            print(repr(l))
+            wave = np.linspace(CRVAL1, 
+                               CRVAL1 + (l - CRPIX1) * CD1_1, 
+                               l)
+            flux = data[0,0,:]
+            err = data[3,0,:]
+        else:
+            # print("Warning: format neither onedspec nor multispec (3d)!\n")
+            raise NotImplementedError("The IRAF spectrum has yet to be provided, not implemented.")
+        hdu.close() 
+        flux *= 1e17
+        err *= 1e17
+        return cls(lam=wave,flux=flux,err=err,z=redshift,ra=ra,dec=dec,name=objname,path=path)
         
         
         
@@ -419,7 +484,8 @@ class QSOFit():
         """
 
         
-        self.name = name
+        name = self.name
+        self.sdss_name = self.name
         self.wave_range = wave_range
         self.wave_mask = wave_mask
         self.BC03 = BC03
@@ -443,20 +509,20 @@ class QSOFit():
         
         
         
-        #get the source name in plate-mjd-fiber, if no then None
-        if name is None:
-            if np.array([self.plateid,self.mjd,self.fiberid]).any() is not None :
-                self.sdss_name = str(self.plateid).zfill(4)+'-'+str(self.mjd)+'-'+str(self.fiberid).zfill(4)
-            else:
-                if self.plateid is None:
-                    self.plateid = 0
-                if self.mjd is None:
-                    self.mjd = 0
-                if self.fiberid is None:
-                    self.fiberid = 0
-                self.sdss_name = ''
-        else:
-            self.sdss_name = name
+        # #get the source name in plate-mjd-fiber, if no then None
+        # if name is None:
+        #     if np.array([self.plateid,self.mjd,self.fiberid]).any() is not None :
+        #         self.sdss_name = str(self.plateid).zfill(4)+'-'+str(self.mjd)+'-'+str(self.fiberid).zfill(4)
+        #     else:
+        #         if self.plateid is None:
+        #             self.plateid = 0
+        #         if self.mjd is None:
+        #             self.mjd = 0
+        #         if self.fiberid is None:
+        #             self.fiberid = 0
+        #         self.sdss_name = ''
+        # else:
+        #     self.sdss_name = name
             
         
         #set default path for figure and fits
@@ -869,15 +935,15 @@ class QSOFit():
 
         # get conti result -----------------------------
         if self.MC == False:
-            self.conti_result = np.array([ra,dec,self.plateid,self.mjd,self.fiberid,self.z,self.SN_ratio_conti,conti_fit.params[1],conti_fit.params[4],conti_fit.params[6],conti_fit.params[7],\
+            self.conti_result = np.array([ra,dec,self.z,self.SN_ratio_conti,conti_fit.params[1],conti_fit.params[4],conti_fit.params[6],conti_fit.params[7],\
                                conti_fit.params[11],conti_fit.params[12],conti_fit.params[13],L[0],L[1],L[2]])
-            self.conti_result_name = np.array(['ra','dec','plateid','MJD','fiberid','redshift','SN_ratio_conti','Fe_uv_FWHM','Fe_op_FWHM','PL_norm','PL_slope',\
+            self.conti_result_name = np.array(['ra','dec','redshift','SN_ratio_conti','Fe_uv_FWHM','Fe_op_FWHM','PL_norm','PL_slope',\
                           'POLY_a','POLY_b','POLY_c','L1350','L3000','L5100'])
 
         else:
-            self.conti_result = np.array([ra,dec,plateid,mjd,fiberid,self.z,self.SN_ratio_conti,conti_fit.params[1],conti_para_std[1],conti_fit.params[4],conti_para_std[4],conti_fit.params[6],conti_para_std[6],conti_fit.params[7],conti_para_std[7],\
+            self.conti_result = np.array([ra,dec,self.z,self.SN_ratio_conti,conti_fit.params[1],conti_para_std[1],conti_fit.params[4],conti_para_std[4],conti_fit.params[6],conti_para_std[6],conti_fit.params[7],conti_para_std[7],\
                                conti_fit.params[11],conti_para_std[11],conti_fit.params[12],conti_para_std[12],conti_fit.params[13],conti_para_std[13],L[0],all_L_std[0],L[1],all_L_std[1],L[2],all_L_std[2]])
-            self.conti_result_name = np.array(['ra','dec','plateid','MJD','fiberid','redshift','SN_ratio_conti','Fe_uv_FWHM','Fe_uv_FWHM_err','Fe_op_FWHM','Fe_op_FWHM_err','PL_norm','PL_norm_err','PL_slope',\
+            self.conti_result_name = np.array(['ra','dec','redshift','SN_ratio_conti','Fe_uv_FWHM','Fe_uv_FWHM_err','Fe_op_FWHM','Fe_op_FWHM_err','PL_norm','PL_norm_err','PL_slope',\
                           'PL_slope_err','POLY_a','POLY_a_err','POLY_b','POLY_b_err','POLY_c','POLY_c_err','L1350','L1350_err','L3000','L3000_err','L5100','L5100_err'])
         
         self.conti_fit = conti_fit 
