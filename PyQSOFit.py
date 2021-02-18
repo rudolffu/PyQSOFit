@@ -13,7 +13,7 @@ import glob
 import matplotlib
 import numpy as np
 import matplotlib.pyplot as plt
-import sfdmap
+# import sfdmap
 from scipy import interpolate
 from scipy import integrate
 from kapteyn import kmpfit
@@ -22,15 +22,21 @@ from astropy.io import fits
 from astropy.cosmology import FlatLambdaCDM
 from astropy.modeling.blackbody import blackbody_lambda
 from astropy.table import Table
+from astropy import units as u
+from astropy.coordinates import SkyCoord
+from quasarfit.extinction import wang2019
+from quasarfit.extinction import deredden
 import warnings
+
 
 warnings.filterwarnings("ignore")
 
 
 class QSOFit():
     
-    def __init__(self, lam, flux, err, z, ra=- 999., dec=-999., plateid=None, mjd=None, fiberid=None, path=None,
-                 and_mask=None, or_mask=None):
+
+    def __init__(self, lam, flux, err, z, ra=None, dec=None, name=None, plateid=None, mjd=None, fiberid=None,
+                 path=None, and_mask=None, or_mask=None):
         """
         Get the input data perpared for the QSO spectral fitting
         
@@ -70,17 +76,91 @@ class QSOFit():
         self.or_mask = or_mask
         self.ra = ra
         self.dec = dec
+        self.name = name
         self.plateid = plateid
         self.mjd = mjd
         self.fiberid = fiberid
         self.path = path
-    
+        if self.ra is not None and self.dec is not None:
+            self.coord = SkyCoord(ra=ra*u.deg, dec=dec*u.deg, frame='icrs')
+        
+        
+    @classmethod
+    def fromiraf(cls, fname, redshift=None, path=None):
+        """
+        Initialize spectrum object from IRAF generated
+        fits file.
+        Parameters:
+        ----------
+            fname : str
+                name of the fits file.
+            redshift : float
+                redshift of the spectrum.
+        Returns:
+        ----------
+            cls : class
+                A Spec object.
+        """
+        hdu = fits.open(fname)
+        header = hdu[0].header
+        objname = header['object']
+        if redshift is None:
+            try:
+                redshift = float(header['redshift'])
+            except:
+                print("Redshift not provided, setting redshift to zero.")
+                redshift = 0
+        try:
+            ra = float(header['ra'])
+            dec = float(header['dec'])
+        except:
+            coord = SkyCoord(header['RA']+header['DEC'], 
+                             frame='icrs',
+                             unit=(u.hourangle, u.deg))
+            ra = coord.ra.value
+            dec = coord.dec.value
+        if path is None:
+            path = './'
+        CRVAL1 = float(header['CRVAL1'])
+        CD1_1 = float(header['CD1_1'])
+        CRPIX1 = float(header['CRPIX1'])
+        data = hdu[0].data
+        hdudata = data
+        dim = len(data.shape)
+        if dim==1:
+            l = len(data)
+            wave = np.linspace(CRVAL1, 
+                               CRVAL1 + (l - CRPIX1) * CD1_1, 
+                               l)
+            flux = data
+            err = None
+        elif dim==3:
+            l = data.shape[2]
+            print(repr(l))
+            wave = np.linspace(CRVAL1, 
+                               CRVAL1 + (l - CRPIX1) * CD1_1, 
+                               l)
+            flux = data[0,0,:]
+            err = data[3,0,:]
+        else:
+            # print("Warning: format neither onedspec nor multispec (3d)!\n")
+            raise NotImplementedError("The IRAF spectrum has yet to be provided, not implemented.")
+        hdu.close() 
+        flux *= 1e17
+        err *= 1e17
+        return cls(lam=wave,flux=flux,err=err,z=redshift,ra=ra,dec=dec,name=objname,path=path)
+        
+        
+        
+
+
     def Fit(self, name=None, nsmooth=1, and_or_mask=True, reject_badpix=True, deredden=True, wave_range=None,
             wave_mask=None, decomposition_host=True, BC03=False, Mi=None, npca_gal=5, npca_qso=20, Fe_uv_op=True,
             Fe_flux_range=None, poly=False, BC=False, rej_abs=False, initial_guess=None, MC=True, n_trails=1,
             linefit=True, tie_lambda=True, tie_width=True, tie_flux_1=True, tie_flux_2=True, save_result=True,
             plot_fig=True, save_fig=True, plot_line_name=True, plot_legend=True, dustmap_path=None, save_fig_path=None,
             save_fits_path=None, save_fits_name=None):
+
         
         """
         Fit the QSO spectrum and get different decomposed components and corresponding parameters
@@ -300,7 +380,8 @@ class QSOFit():
             the information listed in the qsopar.fits.
         """
         
-        self.name = name
+        name = self.name
+        self.sdss_name = self.name
         self.wave_range = wave_range
         self.wave_mask = wave_mask
         self.BC03 = BC03
@@ -323,20 +404,23 @@ class QSOFit():
         self.plot_legend = plot_legend
         self.save_fig = save_fig
         
-        # get the source name in plate-mjd-fiber, if no then None
-        if name is None:
-            if np.array([self.plateid, self.mjd, self.fiberid]).any() is not None:
-                self.sdss_name = str(self.plateid).zfill(4)+'-'+str(self.mjd)+'-'+str(self.fiberid).zfill(4)
-            else:
-                if self.plateid is None:
-                    self.plateid = 0
-                if self.mjd is None:
-                    self.mjd = 0
-                if self.fiberid is None:
-                    self.fiberid = 0
-                self.sdss_name = ''
-        else:
-            self.sdss_name = name
+        
+        
+        # #get the source name in plate-mjd-fiber, if no then None
+        # if name is None:
+        #     if np.array([self.plateid,self.mjd,self.fiberid]).any() is not None :
+        #         self.sdss_name = str(self.plateid).zfill(4)+'-'+str(self.mjd)+'-'+str(self.fiberid).zfill(4)
+        #     else:
+        #         if self.plateid is None:
+        #             self.plateid = 0
+        #         if self.mjd is None:
+        #             self.mjd = 0
+        #         if self.fiberid is None:
+        #             self.fiberid = 0
+        #         self.sdss_name = ''
+        # else:
+        #     self.sdss_name = name
+            
         
         # set default path for figure and fits
         if save_result == True and save_fits_path == None:
@@ -379,13 +463,14 @@ class QSOFit():
             self._WaveTrim(self.lam, self.flux, self.err, self.z)
         if wave_mask is not None:
             self._WaveMsk(self.lam, self.flux, self.err, self.z)
-        if deredden == True and self.ra != -999. and self.dec != -999.:
-            self._DeRedden(self.lam, self.flux, self.err, self.ra, self.dec, dustmap_path)
-        
-        self._RestFrame(self.lam, self.flux, self.err, self.z)
-        self._CalculateSN(self.wave, self.flux)
-        self._OrignialSpec(self.wave, self.flux, self.err)
-        
+        if deredden == True and self.ra is not None and self.dec is not None:
+            self._DeRedden()
+
+
+
+        self._RestFrame(self.lam,self.flux,self.err,self.z)
+        self._CalculateSN(self.lam,self.flux)
+        self._OrignialSpec(self.wave,self.flux,self.err)
 
         # do host decomposition --------------
         if self.z < 1.16 and decomposition_host == True:
@@ -482,8 +567,40 @@ class QSOFit():
             self.lam, self.flux, self.err = lam[ind_not_mask], flux[ind_not_mask], err[ind_not_mask]
             lam, flux, err = self.lam, self.flux, self.err
         return self.lam, self.flux, self.err
-    
-    def _DeRedden(self, lam, flux, err, ra, dec, dustmap_path):
+
+
+    def getebv(self, mapname='planck', mode=None):
+        """
+        Query the dust map with "dustmaps" to get the line-of-sight
+        E(B-V) value for a given object.
+        Parameters:
+        ----------
+            mapname : str
+                One of ['sfd', 'planck']. Other maps are 
+                avaliable in "dustmaps" but not implemented here: 
+                ['bayestar', 'iphas', 'marshall', chen2014',  
+                'lenz2017', 'pg2010', 'leike_ensslin_2019', 'leike2020']
+                Default: 'planck'.
+            mode : str
+                One of ['local', 'web']. Applicable only when
+                mapname == 'sfd'. When 'local', query the local map 
+                on disk. When 'web', query the web server.  
+                Default: 'local'.
+        """
+        if mapname.lower()=='planck':
+            from dustmaps.planck import PlanckQuery
+            planck = PlanckQuery()
+            self.ebv = planck(self.coord)
+        elif mapname.lower()=='sfd' and mode=='local':
+            from dustmaps.sfd import SFDQuery
+            sfd = SFDQuery()
+            self.ebv = sfd(self.coord)
+        elif mapname.lower=='sfd' and mode=='web':
+            from dustmaps.sfd import SFDWebQuery
+            sfd = SFDWebQuery()
+            self.ebv = sfd(self.coord)
+
+    def _DeReddenOld(self, lam, flux, err, ra, dec, dustmap_path):
         """Correct the Galactic extinction"""
         m = sfdmap.SFDMap(dustmap_path)
         zero_flux = np.where(flux == 0, True, False)
@@ -491,6 +608,17 @@ class QSOFit():
         flux_unred = pyasl.unred(lam, flux, m.ebv(ra, dec))
         err_unred = err*flux_unred/flux
         flux_unred[zero_flux] = 0
+        del self.flux, self.err
+        self.flux = flux_unred
+        self.err = err_unred
+        return self.flux
+        
+    def _DeRedden(self):
+        """Correct the Galatical extinction"""   
+        self.getebv() 
+        Alam = wang2019(self.lam, self.ebv)
+        flux_unred = deredden(Alam, self.flux)      
+        err_unred = self.err*flux_unred/self.flux
         del self.flux, self.err
         self.flux = flux_unred
         self.err = err_unred
@@ -754,6 +882,19 @@ class QSOFit():
             self.conti_result = np.append(self.conti_result, Fe_flux_result)
             self.conti_result_type = np.append(self.conti_result_type, Fe_flux_type)
             self.conti_result_name = np.append(self.conti_result_name, Fe_flux_name)
+#=======
+#        if self.MC == False:
+#            self.conti_result = np.array([ra,dec,self.z,self.SN_ratio_conti,conti_fit.params[1],conti_fit.params[4],conti_fit.params[6],conti_fit.params[7],\
+#                               conti_fit.params[11],conti_fit.params[12],conti_fit.params[13],L[0],L[1],L[2]])
+#            self.conti_result_name = np.array(['ra','dec','redshift','SN_ratio_conti','Fe_uv_FWHM','Fe_op_FWHM','PL_norm','PL_slope',\
+#                          'POLY_a','POLY_b','POLY_c','L1350','L3000','L5100'])
+#
+#        else:
+#            self.conti_result = np.array([ra,dec,self.z,self.SN_ratio_conti,conti_fit.params[1],conti_para_std[1],conti_fit.params[4],conti_para_std[4],conti_fit.params[6],conti_para_std[6],conti_fit.params[7],conti_para_std[7],\
+#                               conti_fit.params[11],conti_para_std[11],conti_fit.params[12],conti_para_std[12],conti_fit.params[13],conti_para_std[13],L[0],all_L_std[0],L[1],all_L_std[1],L[2],all_L_std[2]])
+#            self.conti_result_name = np.array(['ra','dec','redshift','SN_ratio_conti','Fe_uv_FWHM','Fe_uv_FWHM_err','Fe_op_FWHM','Fe_op_FWHM_err','PL_norm','PL_norm_err','PL_slope',\
+#                          'PL_slope_err','POLY_a','POLY_a_err','POLY_b','POLY_b_err','POLY_c','POLY_c_err','L1350','L1350_err','L3000','L3000_err','L5100','L5100_err'])
+#>>>>>>> dev
         
         self.conti_fit = conti_fit
         self.tmp_all = tmp_all
@@ -1420,7 +1561,7 @@ class QSOFit():
                             va='top')
         
         ax.set_xlim(wave.min(), wave.max())
-        
+
         if linefit == True:
             ax.text(0.5, -1.4, r'$\rm Rest \, Wavelength$ ($\rm \AA$)', fontsize=20, transform=ax.transAxes,
                     ha='center')
