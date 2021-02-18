@@ -13,7 +13,7 @@ import glob, os,sys,timeit
 import matplotlib
 import numpy as np
 import matplotlib.pyplot as plt
-import sfdmap
+# import sfdmap
 from scipy import interpolate
 from kapteyn import kmpfit
 from PyAstronomy import pyasl
@@ -21,6 +21,10 @@ from astropy.io import fits
 from astropy.cosmology import FlatLambdaCDM
 from astropy.modeling.blackbody import blackbody_lambda
 from astropy.table import Table
+from astropy import units as u
+from astropy.coordinates import SkyCoord
+from quasarfit.extinction import wang2019
+from quasarfit.extinction import deredden
 import warnings
 warnings.filterwarnings("ignore")
 
@@ -141,7 +145,7 @@ def manygauss(xval, pp):
 
 class QSOFit():
     
-    def __init__(self,lam,flux,err,z,ra =- 999.,dec = -999.,plateid = None,mjd = None,fiberid = None,path = None,and_mask = None, or_mask = None):
+    def __init__(self,lam,flux,err,z,ra=None,dec=None,plateid = None,mjd = None,fiberid = None,path = None,and_mask = None, or_mask = None):
         """
         Get the input data perpared for the QSO spectral fitting
         
@@ -185,6 +189,8 @@ class QSOFit():
         self.mjd = mjd
         self.fiberid = fiberid
         self.path = path
+        if self.ra is not None and self.dec is not None:
+            self.coord = SkyCoord(ra=ra*u.deg, dec=dec*u.deg, frame='icrs')
         
         
         
@@ -495,8 +501,8 @@ class QSOFit():
             self._WaveTrim(self.lam,self.flux,self.err,self.z)
         if wave_mask is not None:
             self._WaveMsk(self.lam,self.flux,self.err,self.z)    
-        if deredden == True and self.ra != -999. and self.dec != -999.:
-            self._DeRedden(self.lam,self.flux,self.ra,self.dec,dustmap_path)
+        if deredden == True and self.ra is not None and self.dec is not None:
+            self._DeRedden()
 
 
 
@@ -596,11 +602,51 @@ class QSOFit():
             self.lam,self.flux,self.err = lam[ind_not_mask],flux[ind_not_mask],err[ind_not_mask]
             lam, flux, err = self.lam, self.flux, self.err
         return self.lam,self.flux,self.err
-            
-    def _DeRedden(self,lam,flux,ra,dec,dustmap_path):
-        """Correct the Galatical extinction"""          
-        m = sfdmap.SFDMap(dustmap_path) 
-        flux_unred = pyasl.unred(lam,flux,m.ebv(ra,dec))
+
+    def getebv(self, mapname='planck', mode=None):
+        """
+        Query the dust map with "dustmaps" to get the line-of-sight
+        E(B-V) value for a given object.
+        Parameters:
+        ----------
+            mapname : str
+                One of ['sfd', 'planck']. Other maps are 
+                avaliable in "dustmaps" but not implemented here: 
+                ['bayestar', 'iphas', 'marshall', chen2014',  
+                'lenz2017', 'pg2010', 'leike_ensslin_2019', 'leike2020']
+                Default: 'planck'.
+            mode : str
+                One of ['local', 'web']. Applicable only when
+                mapname == 'sfd'. When 'local', query the local map 
+                on disk. When 'web', query the web server.  
+                Default: 'local'.
+        """
+        if mapname.lower()=='planck':
+            from dustmaps.planck import PlanckQuery
+            planck = PlanckQuery()
+            self.ebv = planck(self.coord)
+        elif mapname.lower()=='sfd' and mode=='local':
+            from dustmaps.sfd import SFDQuery
+            sfd = SFDQuery()
+            self.ebv = sfd(self.coord)
+        elif mapname.lower=='sfd' and mode=='web':
+            from dustmaps.sfd import SFDWebQuery
+            sfd = SFDWebQuery()
+            self.ebv = sfd(self.coord)
+
+    # def _DeRedden(self,lam,flux,ra,dec,dustmap_path):
+    #     """Correct the Galatical extinction"""          
+    #     m = sfdmap.SFDMap(dustmap_path) 
+    #     flux_unred = pyasl.unred(lam,flux,m.ebv(ra,dec))
+    #     del self.flux
+    #     self.flux = flux_unred
+    #     return self.flux
+
+    def _DeRedden(self):
+        """Correct the Galatical extinction"""   
+        self.getebv() 
+        Alam = wang2019(self.lam, self.ebv)
+        flux_unred = deredden(Alam, self.flux)      
         del self.flux
         self.flux = flux_unred
         return self.flux
@@ -1365,7 +1411,7 @@ class QSOFit():
             for ll in range(len(line_cen)):
                 if  wave.min() < line_cen[ll] < wave.max():
                     plt.plot([line_cen[ll],line_cen[ll]],[min(self.host.min(),flux.min()),self.flux_prereduced.max()*1.1],'k:')
-                    plt.text(line_cen[ll]+10,1.*self.flux_prereduced.max(),line_name[ll], rotation = 90, fontsize = 15)
+                    plt.text(line_cen[ll]+10,1.25*self.flux_prereduced.max(),line_name[ll], rotation = 90, fontsize = 15)
  
     
         plt.xlim(wave.min(),wave.max())
