@@ -1572,7 +1572,7 @@ class QSOFit():
             plt.ylabel(r'$\rm f_{\lambda}$ ($\rm 10^{-17} erg\;s^{-1}\;cm^{-2}\;\AA^{-1}$)', fontsize=20)
         
         if self.save_fig == True:
-            plt.savefig(save_fig_path+self.sdss_name+'.eps')
+            plt.savefig(save_fig_path+self.sdss_name+'.pdf')
         
         plt.close()
     
