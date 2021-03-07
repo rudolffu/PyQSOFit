@@ -1,13 +1,16 @@
 #!/usr/bin/python3
 # A code for quasar spectrum fitting
-# Last modified on 3/24/2020
-# Auther: Hengxiao Guo AT UIUC
+# Last modified on 3/4/2021
+# Auther: Hengxiao Guo AT UCI
 # Email: hengxiaoguo AT gmail DOT com
-# Co-Auther Shu Wang, Yue Shen
-# version 1.0
+# Co-Auther Shu Wang, Yue Shen, Wenke Ren
+# version 1.1
 # -------------------------------------------------
 
-# fix the error problem, previous error was underestimated by a factor of 1+z
+# fixed the flux error problem, previous error was underestimated by a factor of 1+z
+# fixed QSO PCA
+# fixed MC parameter unrenewed issue (Thanks Yuming Fu to point this out)
+
 
 import glob
 import matplotlib
@@ -386,7 +389,6 @@ class QSOFit():
         self._CalculateSN(self.wave, self.flux)
         self._OrignialSpec(self.wave, self.flux, self.err)
         
-
         # do host decomposition --------------
         if self.z < 1.16 and decomposition_host == True:
             self._DoDecomposition(self.wave, self.flux, self.err, self.path)
@@ -623,7 +625,7 @@ class QSOFit():
             fgal = interpolate.interp1d(wave_gal[ind_gal], flux_gal[i, ind_gal], bounds_error=False, fill_value=0)
             flux_gal_new[i, :] = fgal(wave[ind_data])
         for i in range(flux_qso.shape[0]):
-            fqso = interpolate.interp1d(wave_qso[ind_qso], flux_qso[0, ind_qso], bounds_error=False, fill_value=0)
+            fqso = interpolate.interp1d(wave_qso[ind_qso], flux_qso[i, ind_qso], bounds_error=False, fill_value=0)
             flux_qso_new[i, :] = fqso(wave[ind_data])
         
         wave_new = wave[ind_data]
@@ -1172,6 +1174,7 @@ class QSOFit():
             line_fit = kmpfit.Fitter(residuals=self._residuals_line, data=(x, flux, err), maxiter=50)
             line_fit.parinfo = pp_limits
             line_fit.fit(params0=pp0)
+            line_fit.params = self.newpp
             all_para_1comp[:, tra] = line_fit.params
             
             # further line properties
@@ -1432,8 +1435,6 @@ class QSOFit():
         
         if self.save_fig == True:
             plt.savefig(save_fig_path+self.sdss_name+'.eps')
-        
-        plt.close()
     
     def CalFWHM(self, logsigma):
         """transfer the logFWHM to normal frame"""
