@@ -610,8 +610,8 @@ class QSOFit():
         flux_qso = qso['pca'].reshape(qso['pca'].shape[1], qso['pca'].shape[2])
         
         # get the shortest wavelength range
-        wave_min = max(wave.min(), wave_gal.min(), wave_qso.min())
-        wave_max = min(wave.max(), wave_gal.max(), wave_qso.max())
+        wave_min = min(wave.min(), wave_gal.min(), wave_qso.min())
+        wave_max = max(wave.max(), wave_gal.max(), wave_qso.max())
         
         ind_data = np.where((wave > wave_min) & (wave < wave_max), True, False)
         ind_gal = np.where((wave_gal > wave_min-1.) & (wave_gal < wave_max+1.), True, False)
